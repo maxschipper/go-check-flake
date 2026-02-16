@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -55,6 +56,9 @@ type GitHubRepo struct {
 }
 
 // --- Configuration ---
+
+// Mutex to prevent print outputs from overlapping
+var outputMutex sync.Mutex
 
 func getFlakeLockPath() string {
 	path := os.Getenv("NH_FLAKE")
@@ -142,13 +146,18 @@ func checkInput(name string, node Node, token string, onlyOutdated bool) {
 	repo := node.Locked.Repo
 	branchHint := node.Original.Ref
 
+	// Network Request (Done in parallel, no lock needed yet)
 	upstreamTs, upstreamDt, err := getUpstreamInfo(owner, repo, branchHint, token)
+
+	// LOCK OUTPUT: Only one goroutine can print at a time
+	outputMutex.Lock()
+	defer outputMutex.Unlock()
 
 	if err != nil {
 		if !onlyOutdated {
 			fmt.Printf("Checking %s (%s/%s)...\n", name, owner, repo)
 			fmt.Printf("    ❌ Could not fetch upstream info: %v\n", err)
-			fmt.Println(strings.Repeat("-", 47))
+			fmt.Println(strings.Repeat("-", 40))
 		}
 		return
 	}
@@ -253,25 +262,33 @@ func main() {
 			fmt.Println("No inputs found to check.")
 		}
 
+		// PARALLELIZATION START
+		var wg sync.WaitGroup
+
 		for _, name := range inputsToCheck {
 			var nodeKey = name
 
 			if ok {
 				if val, exists := rootNode.Inputs[name]; exists {
-					// Handle polymorphism: val can be string OR []interface{}
 					if strVal, isString := val.(string); isString {
 						nodeKey = strVal
 					} else {
-						// If it's a list (follows), we stick with 'name' as the key
 						nodeKey = name
 					}
 				}
 			}
 
 			if node, exists := lockData.Nodes[nodeKey]; exists {
-				checkInput(name, node, token, onlyOutdated)
+				wg.Add(1)
+				// Launch a goroutine
+				go func(n string, nd Node) {
+					defer wg.Done()
+					checkInput(n, nd, token, onlyOutdated)
+				}(name, node)
 			}
 		}
+
+		wg.Wait()
 
 	} else {
 		node, ok := lockData.Nodes[flakeInput]
@@ -279,6 +296,7 @@ func main() {
 			fmt.Printf("Error: Input '%s' not found.\n", flakeInput)
 			os.Exit(1)
 		}
+		// Single input check doesn't need goroutines, but using the locked version is fine
 		checkInput(flakeInput, node, token, false)
 	}
 }
