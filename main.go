@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// --- Structs for flake.lock parsing ---
+// structs for flake.lock parsing
 
 type FlakeLock struct {
 	Root  string          `json:"root"`
@@ -39,7 +39,7 @@ type OriginalData struct {
 	Ref string `json:"ref"`
 }
 
-// --- Structs for GitHub API response ---
+// structs for github api response
 
 type GitHubBranch struct {
 	Commit struct {
@@ -55,9 +55,9 @@ type GitHubRepo struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
-// --- Configuration ---
+// configuration
 
-// Mutex to prevent print outputs from overlapping
+// mutex to prevent print outputs from overlapping
 var outputMutex sync.Mutex
 
 func getFlakeLockPath() string {
@@ -68,7 +68,7 @@ func getFlakeLockPath() string {
 	return filepath.Join(path, "flake.lock")
 }
 
-// --- Helpers ---
+// helpers
 
 func getTokenFromGhCLI() string {
 	cmd := exec.Command("gh", "auth", "token")
@@ -93,7 +93,7 @@ func getUpstreamInfo(owner, repo, branchHint, token string) (int64, time.Time, e
 		return client.Do(req)
 	}
 
-	// 1. Determine Branch
+	// determine branch
 	branch := branchHint
 	if branch == "" {
 		resp, err := makeReq(fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo))
@@ -112,7 +112,7 @@ func getUpstreamInfo(owner, repo, branchHint, token string) (int64, time.Time, e
 		branch = repoData.DefaultBranch
 	}
 
-	// 2. Get Commit Date
+	// get commit date
 	resp, err := makeReq(fmt.Sprintf("https://api.github.com/repos/%s/%s/branches/%s", owner, repo, branch))
 	if err != nil {
 		return 0, time.Time{}, err
@@ -146,10 +146,9 @@ func checkInput(name string, node Node, token string, onlyOutdated bool) {
 	repo := node.Locked.Repo
 	branchHint := node.Original.Ref
 
-	// Network Request (Done in parallel, no lock needed yet)
 	upstreamTs, upstreamDt, err := getUpstreamInfo(owner, repo, branchHint, token)
 
-	// LOCK OUTPUT: Only one goroutine can print at a time
+	// lock output for printing
 	outputMutex.Lock()
 	defer outputMutex.Unlock()
 
@@ -185,8 +184,6 @@ func checkInput(name string, node Node, token string, onlyOutdated bool) {
 
 	fmt.Println(strings.Repeat("-", 40))
 }
-
-// --- Main ---
 
 func main() {
 	all := flag.Bool("a", false, "Check all inputs and show all results")
@@ -262,7 +259,7 @@ func main() {
 			fmt.Println("No inputs found to check.")
 		}
 
-		// PARALLELIZATION START
+		// parallelization start
 		var wg sync.WaitGroup
 
 		for _, name := range inputsToCheck {
@@ -280,7 +277,6 @@ func main() {
 
 			if node, exists := lockData.Nodes[nodeKey]; exists {
 				wg.Add(1)
-				// Launch a goroutine
 				go func(n string, nd Node) {
 					defer wg.Done()
 					checkInput(n, nd, token, onlyOutdated)
@@ -296,7 +292,7 @@ func main() {
 			fmt.Printf("Error: Input '%s' not found.\n", flakeInput)
 			os.Exit(1)
 		}
-		// Single input check doesn't need goroutines, but using the locked version is fine
+		// single input check doesn't need goroutines, but using the locked version is fine
 		checkInput(flakeInput, node, token, false)
 	}
 }
